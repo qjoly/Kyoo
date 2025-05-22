@@ -87,7 +87,8 @@ jobs:
 
       - name: Check if a package should be pushed
         run: |
-          echo "SHOULD_PUSH=$([ "${GITHUB_REF##*/}" == "master" ] || [ "${GITHUB_REF##*/}" == "next" ] || [ "${GITHUB_REF_TYPE}" == "tag" ] && echo "true" || echo "false")" >> $GITHUB_ENV
+          echo "SHOULD_PUSH=true" >> $GITHUB_ENV
+#          echo "SHOULD_PUSH=$([ "${GITHUB_REF##*/}" == "master" ] || [ "${GITHUB_REF##*/}" == "next" ] || [ "${GITHUB_REF_TYPE}" == "tag" ] && echo "true" || echo "false")" >> $GITHUB_ENV
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
