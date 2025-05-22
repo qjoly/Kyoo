@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/zoriya/kyoo/transcoder/src"
 	"github.com/zoriya/kyoo/transcoder/src/api"
 	"github.com/zoriya/kyoo/transcoder/src/utils"
@@ -23,6 +25,7 @@ import (
 //
 // Path: /:path/direct
 func DirectStream(c echo.Context) error {
+	httpRequestsTotal.WithLabelValues(c.Path(), c.Request().Method).Inc()
 	path, _, err := GetPath(c)
 	if err != nil {
 		return err
@@ -38,6 +41,7 @@ func DirectStream(c echo.Context) error {
 //
 // Path: /:path/master.m3u8
 func (h *Handler) GetMaster(c echo.Context) error {
+	httpRequestsTotal.WithLabelValues(c.Path(), c.Request().Method).Inc()
 	client, err := GetClientId(c)
 	if err != nil {
 		return err
@@ -62,6 +66,7 @@ func (h *Handler) GetMaster(c echo.Context) error {
 //
 // Path: /:path/:video/:quality/index.m3u8
 func (h *Handler) GetVideoIndex(c echo.Context) error {
+	httpRequestsTotal.WithLabelValues(c.Path(), c.Request().Method).Inc()
 	video, err := strconv.ParseInt(c.Param("video"), 10, 32)
 	if err != nil {
 		return err
@@ -94,6 +99,7 @@ func (h *Handler) GetVideoIndex(c echo.Context) error {
 //
 // Path: /:path/audio/:audio/index.m3u8
 func (h *Handler) GetAudioIndex(c echo.Context) error {
+	httpRequestsTotal.WithLabelValues(c.Path(), c.Request().Method).Inc()
 	audio, err := strconv.ParseInt(c.Param("audio"), 10, 32)
 	if err != nil {
 		return err
@@ -120,6 +126,9 @@ func (h *Handler) GetAudioIndex(c echo.Context) error {
 //
 // Path: /:path/:video/:quality/segments-:chunk.ts
 func (h *Handler) GetVideoSegment(c echo.Context) error {
+	httpRequestsTotal.WithLabelValues(c.Path(), c.Request().Method).Inc()
+	transcodeActiveTotal.Inc()
+	defer transcodeActiveTotal.Dec()
 	video, err := strconv.ParseInt(c.Param("video"), 10, 32)
 	if err != nil {
 		return err
@@ -162,6 +171,9 @@ func (h *Handler) GetVideoSegment(c echo.Context) error {
 //
 // Path: /:path/audio/:audio/segments-:chunk.ts
 func (h *Handler) GetAudioSegment(c echo.Context) error {
+	httpRequestsTotal.WithLabelValues(c.Path(), c.Request().Method).Inc()
+	transcodeActiveTotal.Inc()
+	defer transcodeActiveTotal.Dec()
 	audio, err := strconv.ParseInt(c.Param("audio"), 10, 32)
 	if err != nil {
 		return err
@@ -192,6 +204,7 @@ func (h *Handler) GetAudioSegment(c echo.Context) error {
 //
 // Path: /:path/info
 func (h *Handler) GetInfo(c echo.Context) error {
+	httpRequestsTotal.WithLabelValues(c.Path(), c.Request().Method).Inc()
 	path, sha, err := GetPath(c)
 	if err != nil {
 		return err
@@ -214,6 +227,7 @@ func (h *Handler) GetInfo(c echo.Context) error {
 //
 // Path: /:path/attachment/:name
 func (h *Handler) GetAttachment(c echo.Context) (err error) {
+	httpRequestsTotal.WithLabelValues(c.Path(), c.Request().Method).Inc()
 	_, sha, err := GetPath(c)
 	if err != nil {
 		return err
@@ -243,6 +257,7 @@ func (h *Handler) GetAttachment(c echo.Context) (err error) {
 //
 // Path: /:path/subtitle/:name
 func (h *Handler) GetSubtitle(c echo.Context) (err error) {
+	httpRequestsTotal.WithLabelValues(c.Path(), c.Request().Method).Inc()
 	_, sha, err := GetPath(c)
 	if err != nil {
 		return err
@@ -277,6 +292,7 @@ func (h *Handler) GetSubtitle(c echo.Context) (err error) {
 //
 // Path: /:path/thumbnails.png
 func (h *Handler) GetThumbnails(c echo.Context) (err error) {
+	httpRequestsTotal.WithLabelValues(c.Path(), c.Request().Method).Inc()
 	path, sha, err := GetPath(c)
 	if err != nil {
 		return err
@@ -298,6 +314,7 @@ func (h *Handler) GetThumbnails(c echo.Context) (err error) {
 //
 // Path: /:path/:resource/:slug/thumbnails.vtt
 func (h *Handler) GetThumbnailsVtt(c echo.Context) (err error) {
+	httpRequestsTotal.WithLabelValues(c.Path(), c.Request().Method).Inc()
 	path, sha, err := GetPath(c)
 	if err != nil {
 		return err
@@ -355,8 +372,39 @@ func guessMimeType(path string, content any) (string, error) {
 	return mimeType, nil
 }
 
+var (
+	httpRequestsTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "http_requests_total",
+			Help: "Total number of HTTP requests processed, labeled by path and method.",
+		},
+		[]string{"path", "method"},
+	)
+	transcodeActiveTotal = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "transcode_active_total",
+			Help: "Current number of active transcodings (video/audio segment handlers).",
+		},
+	)
+)
+
+func init() {
+	prometheus.MustRegister(httpRequestsTotal)
+	prometheus.MustRegister(transcodeActiveTotal)
+}
+
+func PrometheusMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
+	return func(c echo.Context) error {
+		err := next(c)
+		httpRequestsTotal.WithLabelValues(c.Path(), c.Request().Method).Inc()
+		return err
+	}
+}
+
 func main() {
 	e := echo.New()
+
+	e.GET("/metrics", echo.WrapHandler(promhttp.Handler()))
 
 	if err := run(e); err != nil {
 		e.Logger.Fatal(err)
@@ -365,6 +413,7 @@ func main() {
 
 func run(e *echo.Echo) (err error) {
 	e.Use(middleware.Logger())
+	e.Use(PrometheusMiddleware)
 	e.HTTPErrorHandler = ErrorHandler
 
 	metadata, err := src.NewMetadataService()
