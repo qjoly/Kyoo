@@ -137,6 +137,7 @@ func (h *Handler) GetVideoSegment(c echo.Context) error {
 	if err != nil {
 		return err
 	}
+	transcodedVideoQualityTotal.WithLabelValues(string(quality)).Inc()
 	segment, err := ParseSegment(c.Param("chunk"))
 	if err != nil {
 		return err
@@ -172,8 +173,6 @@ func (h *Handler) GetVideoSegment(c echo.Context) error {
 // Path: /:path/audio/:audio/segments-:chunk.ts
 func (h *Handler) GetAudioSegment(c echo.Context) error {
 	httpRequestsTotal.WithLabelValues(c.Path(), c.Request().Method).Inc()
-	transcodeActiveTotal.Inc()
-	defer transcodeActiveTotal.Dec()
 	audio, err := strconv.ParseInt(c.Param("audio"), 10, 32)
 	if err != nil {
 		return err
@@ -386,11 +385,19 @@ var (
 			Help: "Current number of active transcodings (video/audio segment handlers).",
 		},
 	)
+	transcodedVideoQualityTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "transcoded_video_quality_total",
+			Help: "Total number of transcoded video segment requests, labeled by quality.",
+		},
+		[]string{"quality"},
+	)
 )
 
 func init() {
 	prometheus.MustRegister(httpRequestsTotal)
 	prometheus.MustRegister(transcodeActiveTotal)
+	prometheus.MustRegister(transcodedVideoQualityTotal)
 }
 
 func PrometheusMiddleware(next echo.HandlerFunc) echo.HandlerFunc {
